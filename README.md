@@ -35,4 +35,14 @@ will be converted to:
 The script is not guaranteed to be perfect so the output may require cleanup,
 but it saves a great deal of time looking up each pin individually.  
 
+## crcgen.py
+
+crcgen.py is used to generate unrolled linear feedback shift registers for
+efficient CRC calculation, among other things.  The script generates Verilog
+code for unrolled CRC logic for any CRC polynomial and data word length.  The
+script can optionally generate a complete implementation for a CRC computation
+with initialization and CRC state storage register, or it can just output the
+bare next state logic.  
+
+The default CRC algorithm is CRC-32 with an 8 bit data input.  
 
