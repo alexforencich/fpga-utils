@@ -9,6 +9,7 @@ Usage: crcgen [OPTION]...
   -d, --datawidth   specify width of input data bus (default 8)
   -p, --poly        specify CRC polynomial (default 0x04c11db7)
   -i, --init        specify CRC initial state (default -1)
+  -l, --load        include load logic
   -b, --bare        only generate combinatorial logic
   -n, --name        specify module name
   -o, --output      specify output file name
@@ -29,7 +30,7 @@ def main(argv=None):
         argv = sys.argv
     try:
         try:
-            opts, args = getopt.getopt(argv[1:], "?w:d:p:i:bn:o:", ["help", "width=", "datawidth=", "poly=", "init=", "bare", "name=", "output="])
+            opts, args = getopt.getopt(argv[1:], "?w:d:p:i:lbn:o:", ["help", "width=", "datawidth=", "poly=", "init=", "load", "bare", "name=", "output="])
         except getopt.error as msg:
              raise Usage(msg)
         # more code, unchanged
@@ -42,6 +43,7 @@ def main(argv=None):
     datawidth = 8
     poly = 0x04c11db7
     init = -1
+    load = False
     bare = False
     name = None
     out_name = None
@@ -59,6 +61,8 @@ def main(argv=None):
             poly = int(a, 0)
         if o in ('-i', '--init'):
             init = int(a, 0)
+        if o in ('-l', '--load'):
+            load = True
         if o in ('-b', '--bare'):
             bare = True
         if o in ('-n', '--name'):
@@ -75,7 +79,7 @@ def main(argv=None):
         return 2
 
     if name is None:
-        name = "crc_%d_%d_0x%x%s" % (width, datawidth, poly, ('_bare' if bare else ''))
+        name = "crc_%d_%d_0x%x%s" % (width, datawidth, poly, (('_load' if load else '')+('_bare' if bare else '')))
 
     if out_name is None:
         out_name = name + ".v"
@@ -199,6 +203,10 @@ module {{name}}
     input  wire [{{dw-1}}:0] data_in,
     input  wire data_in_valid,
     input  wire crc_init,
+{%- if load %}
+    input  wire crc_load,
+    input  wire [{{w-1}}:0] crc_in,
+{%- endif %}
     output wire [{{w-1}}:0] crc_out
 {%- else %}
     input  wire [{{dw-1}}:0] data_in,
@@ -228,6 +236,10 @@ always @(posedge clk or posedge rst) begin
     end else begin
         if (crc_init) begin
             crc_state <= {{w}}'h{{'%x' % init}};
+{%- if load %}
+        end else if (crc_load) begin
+            crc_state <= crc_in;
+{%- endif %}
         end else if (data_in_valid) begin
             crc_state <= crc_next;
         end
@@ -246,6 +258,7 @@ endmodule
         init=init,
         poly_str=poly_str,
         crc_next=crc_next,
+        load=load,
         bare=bare,
         name=name
     ))
