@@ -125,40 +125,21 @@ def main(argv=None):
     # initial state is 1:1 mapping from previous state to next state
     crc_next = collections.deque([[[x], []] for x in range(width)])
 
-    if not reverse:
-        # normal order
-        for i in range(datawidth-1, -1, -1):
-            # determine shift in value
-            # current value in last FF, XOR with input data bit (MSB first)
-            val = copy.deepcopy(crc_next[-1])
-            val[1].append(i)
+    for i in range(datawidth-1, -1, -1):
+        # determine shift in value
+        # current value in last FF, XOR with input data bit (MSB first)
+        val = copy.deepcopy(crc_next[-1])
+        val[1].append(i)
 
-            # shift
-            crc_next.rotate(1)
-            crc_next[0] = val
+        # shift
+        crc_next.rotate(1)
+        crc_next[0] = val
 
-            # add XOR inputs at correct indicies
-            for i in range(1, width):
-                if poly & (1 << i):
-                    crc_next[i][0]+=val[0]
-                    crc_next[i][1]+=val[1]
-    else:
-        # reversed input and output
-        for i in range(datawidth-1, -1, -1):
-            # determine shift in value
-            # current value in last FF, XOR with input data bit (MSB first)
-            val = copy.deepcopy(crc_next[0])
-            val[1].append(datawidth-i-1)
-
-            # shift
-            crc_next.rotate(-1)
-            crc_next[-1] = val
-
-            # add XOR inputs at correct indicies
-            for i in range(1, width):
-                if poly & (1 << i):
-                    crc_next[width-i-1][0]+=val[0]
-                    crc_next[width-i-1][1]+=val[1]
+        # add XOR inputs at correct indicies
+        for i in range(1, width):
+            if poly & (1 << i):
+                crc_next[i][0]+=val[0]
+                crc_next[i][1]+=val[1]
 
     # optimize
     # since X^X = 0, bin and count identical inputs
@@ -180,6 +161,18 @@ def main(argv=None):
     init2 = init;
 
     if reverse:
+        # reverse outputs
+        crc_next.reverse()
+        for i in range(width):
+            # reverse state input
+            for j in range(len(crc_next[i][0])):
+                crc_next[i][0][j] = width - crc_next[i][0][j] - 1
+            crc_next[i][0].sort()
+            # reverse data input
+            for j in range(len(crc_next[i][1])):
+                crc_next[i][1][j] = datawidth - crc_next[i][1][j] - 1
+            crc_next[i][1].sort()
+        # reverse init value
         init2 = int('{:0{width}b}'.format(init, width=width)[::-1], 2)
 
     t = Template(u"""/*
