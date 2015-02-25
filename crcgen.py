@@ -14,6 +14,7 @@ Usage: crcgen [OPTION]...
                       fibonacci (external xor, common for LFSR)
   -l, --load        include load logic
   -b, --bare        only generate combinatorial logic
+  -e, --extend      extend state width to data width
   -r, --reverse     bit-reverse input and output
   -n, --name        specify module name
   -o, --output      specify output file name
@@ -34,7 +35,7 @@ def main(argv=None):
         argv = sys.argv
     try:
         try:
-            opts, args = getopt.getopt(argv[1:], "?w:d:p:i:c:lbrn:o:", ["help", "width=", "datawidth=", "poly=", "init=", "config=", "load", "bare", "reverse", "name=", "output="])
+            opts, args = getopt.getopt(argv[1:], "?w:d:p:i:c:lbern:o:", ["help", "width=", "datawidth=", "poly=", "init=", "config=", "load", "bare", "extend", "reverse", "name=", "output="])
         except getopt.error as msg:
              raise Usage(msg)
         # more code, unchanged
@@ -50,6 +51,7 @@ def main(argv=None):
     config = 'galois'
     load = False
     bare = False
+    extend = False
     reverse = False
     name = None
     out_name = None
@@ -75,6 +77,8 @@ def main(argv=None):
             load = True
         if o in ('-b', '--bare'):
             bare = True
+        if o in ('-e', '--extend'):
+            extend = True
         if o in ('-r', '--reverse'):
             reverse = True
         if o in ('-n', '--name'):
@@ -140,6 +144,7 @@ def main(argv=None):
     # list elements are [last state, input data]
     # initial state is 1:1 mapping from previous state to next state
     crc_next = collections.deque([[[x], []] for x in range(width)])
+    extend_list = []
 
     if config == 'galois':
         # Galois configuration
@@ -151,6 +156,7 @@ def main(argv=None):
 
             # shift
             crc_next.rotate(1)
+            extend_list.insert(0, crc_next[0])
             crc_next[0] = val
 
             # add XOR inputs at correct indicies
@@ -174,12 +180,21 @@ def main(argv=None):
 
             # shift
             crc_next.rotate(1)
+            extend_list.insert(0, crc_next[0])
             crc_next[0] = val
+
+    state_width = width
+
+    if extend and datawidth > width:
+        state_width = datawidth
+
+        # add the bits that fell off the end while shifting
+        crc_next += extend_list[:datawidth-width]
 
     # optimize
     # since X^X = 0, bin and count identical inputs
     # keep one input if the total count is odd, discard the rest
-    for i in range(width):
+    for i in range(state_width):
         for j in range(2):
             cnt = collections.Counter()
             for e in crc_next[i][j]:
@@ -192,23 +207,23 @@ def main(argv=None):
             crc_next[i][j] = lst
 
     # mask init value at the proper width
-    init = ((1 << width) - 1) & init;
+    init = ((1 << state_width) - 1) & init;
     init2 = init;
 
     if reverse:
         # reverse outputs
         crc_next.reverse()
-        for i in range(width):
+        for i in range(state_width):
             # reverse state input
             for j in range(len(crc_next[i][0])):
-                crc_next[i][0][j] = width - crc_next[i][0][j] - 1
+                crc_next[i][0][j] = state_width - crc_next[i][0][j] - 1
             crc_next[i][0].sort()
             # reverse data input
             for j in range(len(crc_next[i][1])):
                 crc_next[i][1][j] = datawidth - crc_next[i][1][j] - 1
             crc_next[i][1].sort()
         # reverse init value
-        init2 = int('{:0{width}b}'.format(init, width=width)[::-1], 2)
+        init2 = int('{:0{width}b}'.format(init, width=state_width)[::-1], 2)
 
     t = Template(u"""/*
 
@@ -242,12 +257,18 @@ THE SOFTWARE.
  * CRC module {{name}}
  *
  * CRC width:      {{w}}
+{%- if w != sw %}
+ * State width:    {{sw}}
+{%- endif %}
  * Data width:     {{dw}}
 {%- if not bare %}
  * Initial value:  {{w}}'h{{'%x' % init}}{%- if reverse %} (reversed: {{w}}'h{{'%x' % init2}}){%- endif %}
 {%- endif %}
  * CRC polynomial: {{w}}'h{{'%x' % poly}}
  * Configuration:  {{config}}
+{%- if extend %}
+ * Extend state:   yes
+{%- endif %}
 {%- if reverse %}
  * Bit-reverse:    input and output
 {%- endif %}
@@ -270,22 +291,22 @@ module {{name}}
     input  wire crc_init,
 {%- if load %}
     input  wire crc_load,
-    input  wire [{{w-1}}:0] crc_in,
+    input  wire [{{sw-1}}:0] crc_in,
 {%- endif %}
-    output wire [{{w-1}}:0] crc_out
+    output wire [{{sw-1}}:0] crc_out
 {%- else %}
     input  wire [{{dw-1}}:0] data_in,
-    input  wire [{{w-1}}:0] crc_state,
-    output wire [{{w-1}}:0] crc_next
+    input  wire [{{sw-1}}:0] crc_state,
+    output wire [{{sw-1}}:0] crc_next
 {%- endif %}
 );
 {% if not bare %}
-reg [{{w-1}}:0] crc_state;
+reg [{{sw-1}}:0] crc_state;
 wire crc_next;
 
 assign crc_out = crc_next;
 {% endif -%}
-{%- for p in range(w) %}
+{%- for p in range(sw) %}
 assign crc_next[{{p}}] = {% if crc_next[p][0]|length == 0 and crc_next[p][1]|length == 0 -%}0{% else %}
         {%- for i in crc_next[p][0] %}{% if not loop.first %} ^ {% endif %}crc_state[{{i}}]{% endfor %}
         {%- for i in crc_next[p][1] %}{% if crc_next[p][0]|length != 0 or not loop.first %} ^ {% endif %}data_in[{{i}}] {%- endfor %}{% endif %};
@@ -294,10 +315,10 @@ assign crc_next[{{p}}] = {% if crc_next[p][0]|length == 0 and crc_next[p][1]|len
 {% if not bare -%}
 always @(posedge clk or posedge rst) begin
     if (rst) begin
-        crc_state <= {{w}}'h{{'%x' % init2}};
+        crc_state <= {{sw}}'h{{'%x' % init2}};
     end else begin
         if (crc_init) begin
-            crc_state <= {{w}}'h{{'%x' % init2}};
+            crc_state <= {{sw}}'h{{'%x' % init2}};
 {%- if load %}
         end else if (crc_load) begin
             crc_state <= crc_in;
@@ -315,6 +336,7 @@ endmodule
     
     out_file.write(t.render(
         w=width,
+        sw=state_width,
         dw=datawidth,
         poly=poly,
         init=init,
@@ -324,6 +346,7 @@ endmodule
         load=load,
         bare=bare,
         config=config,
+        extend=extend,
         reverse=reverse,
         name=name,
         cmdline=cmdline
