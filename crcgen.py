@@ -304,7 +304,7 @@ module {{name}}
 reg [{{sw-1}}:0] crc_state;
 wire crc_next;
 
-assign crc_out = crc_next;
+assign crc_out = crc_state;
 {% endif -%}
 {%- for p in range(sw) %}
 assign crc_next[{{p}}] = {% if crc_next[p][0]|length == 0 and crc_next[p][1]|length == 0 -%}0{% else %}
