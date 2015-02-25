@@ -11,6 +11,7 @@ Usage: crcgen [OPTION]...
   -i, --init        specify CRC initial state (default -1)
   -l, --load        include load logic
   -b, --bare        only generate combinatorial logic
+  -r, --reverse     bit-reverse input and output
   -n, --name        specify module name
   -o, --output      specify output file name
 """
@@ -30,7 +31,7 @@ def main(argv=None):
         argv = sys.argv
     try:
         try:
-            opts, args = getopt.getopt(argv[1:], "?w:d:p:i:lbn:o:", ["help", "width=", "datawidth=", "poly=", "init=", "load", "bare", "name=", "output="])
+            opts, args = getopt.getopt(argv[1:], "?w:d:p:i:lbrn:o:", ["help", "width=", "datawidth=", "poly=", "init=", "load", "bare", "reverse", "name=", "output="])
         except getopt.error as msg:
              raise Usage(msg)
         # more code, unchanged
@@ -45,6 +46,7 @@ def main(argv=None):
     init = -1
     load = False
     bare = False
+    reverse = False
     name = None
     out_name = None
 
@@ -65,6 +67,8 @@ def main(argv=None):
             load = True
         if o in ('-b', '--bare'):
             bare = True
+        if o in ('-r', '--reverse'):
+            reverse = True
         if o in ('-n', '--name'):
             name = a
         if o in ('-o', '--output'):
@@ -77,7 +81,13 @@ def main(argv=None):
         return 2
 
     if name is None:
-        name = "crc_%d_%d_0x%x%s" % (width, datawidth, poly, (('_load' if load else '')+('_bare' if bare else '')))
+        name = "crc_%d_%d_0x%x" % (width, datawidth, poly)
+        if load:
+            name += '_load'
+        if bare:
+            name += '_bare'
+        if reverse:
+            name += '_rev'
 
     if out_name is None:
         out_name = name + ".v"
@@ -115,21 +125,40 @@ def main(argv=None):
     # initial state is 1:1 mapping from previous state to next state
     crc_next = collections.deque([[[x], []] for x in range(width)])
 
-    for i in range(datawidth-1, -1, -1):
-        # determine shift in value
-        # current value in last FF, XOR with input data bit (MSB first)
-        val = copy.deepcopy(crc_next[-1])
-        val[1].append(i)
+    if not reverse:
+        # normal order
+        for i in range(datawidth-1, -1, -1):
+            # determine shift in value
+            # current value in last FF, XOR with input data bit (MSB first)
+            val = copy.deepcopy(crc_next[-1])
+            val[1].append(i)
 
-        # shift
-        crc_next.rotate(1)
-        crc_next[0] = val
+            # shift
+            crc_next.rotate(1)
+            crc_next[0] = val
 
-        # add XOR inputs at correct indicies
-        for i in range(1, width):
-            if poly & (1 << i):
-                crc_next[i][0]+=val[0]
-                crc_next[i][1]+=val[1]
+            # add XOR inputs at correct indicies
+            for i in range(1, width):
+                if poly & (1 << i):
+                    crc_next[i][0]+=val[0]
+                    crc_next[i][1]+=val[1]
+    else:
+        # reversed input and output
+        for i in range(datawidth-1, -1, -1):
+            # determine shift in value
+            # current value in last FF, XOR with input data bit (MSB first)
+            val = copy.deepcopy(crc_next[0])
+            val[1].append(datawidth-i-1)
+
+            # shift
+            crc_next.rotate(-1)
+            crc_next[-1] = val
+
+            # add XOR inputs at correct indicies
+            for i in range(1, width):
+                if poly & (1 << i):
+                    crc_next[width-i-1][0]+=val[0]
+                    crc_next[width-i-1][1]+=val[1]
 
     # optimize
     # since X^X = 0, bin and count identical inputs
@@ -148,6 +177,10 @@ def main(argv=None):
 
     # mask init value at the proper width
     init = ((1 << width) - 1) & init;
+    init2 = init;
+
+    if reverse:
+        init2 = int('{:0{width}b}'.format(init, width=width)[::-1], 2)
 
     t = Template(u"""/*
 
@@ -183,9 +216,12 @@ THE SOFTWARE.
  * CRC width:      {{w}}
  * Data width:     {{dw}}
 {%- if not bare %}
- * Initial value:  {{w}}'h{{'%x' % init}}
+ * Initial value:  {{w}}'h{{'%x' % init}}{%- if reverse %} (reversed: {{w}}'h{{'%x' % init2}}){%- endif %}
 {%- endif %}
  * CRC polynomial: {{w}}'h{{'%x' % poly}}
+{%- if reverse %}
+ * Bit-reverse:    input and output
+{%- endif %}
  * 
  * {{poly_str}}
  *
@@ -229,10 +265,10 @@ assign crc_next[{{p}}] = {% if crc_next[p][0]|length == 0 and crc_next[p][1]|len
 {% if not bare -%}
 always @(posedge clk or posedge rst) begin
     if (rst) begin
-        crc_state <= {{w}}'h{{'%x' % init}};
+        crc_state <= {{w}}'h{{'%x' % init2}};
     end else begin
         if (crc_init) begin
-            crc_state <= {{w}}'h{{'%x' % init}};
+            crc_state <= {{w}}'h{{'%x' % init2}};
 {%- if load %}
         end else if (crc_load) begin
             crc_state <= crc_in;
@@ -253,10 +289,12 @@ endmodule
         dw=datawidth,
         poly=poly,
         init=init,
+        init2=init2,
         poly_str=poly_str,
         crc_next=crc_next,
         load=load,
         bare=bare,
+        reverse=reverse,
         name=name,
         cmdline=cmdline
     ))
