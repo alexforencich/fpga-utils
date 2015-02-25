@@ -9,6 +9,9 @@ Usage: crcgen [OPTION]...
   -d, --datawidth   specify width of input data bus (default 8)
   -p, --poly        specify CRC polynomial (default 0x04c11db7)
   -i, --init        specify CRC initial state (default -1)
+  -c, --config      specify LFSR configuration
+                      galois (internal xor, common for CRC, default)
+                      fibonacci (external xor, common for LFSR)
   -l, --load        include load logic
   -b, --bare        only generate combinatorial logic
   -r, --reverse     bit-reverse input and output
@@ -31,7 +34,7 @@ def main(argv=None):
         argv = sys.argv
     try:
         try:
-            opts, args = getopt.getopt(argv[1:], "?w:d:p:i:lbrn:o:", ["help", "width=", "datawidth=", "poly=", "init=", "load", "bare", "reverse", "name=", "output="])
+            opts, args = getopt.getopt(argv[1:], "?w:d:p:i:c:lbrn:o:", ["help", "width=", "datawidth=", "poly=", "init=", "config=", "load", "bare", "reverse", "name=", "output="])
         except getopt.error as msg:
              raise Usage(msg)
         # more code, unchanged
@@ -44,6 +47,7 @@ def main(argv=None):
     datawidth = 8
     poly = 0x04c11db7
     init = -1
+    config = 'galois'
     load = False
     bare = False
     reverse = False
@@ -63,6 +67,10 @@ def main(argv=None):
             poly = int(a, 0)
         if o in ('-i', '--init'):
             init = int(a, 0)
+        if o in ('-c', '--config'):
+            if a not in ('galois', 'fibonacci'):
+                raise Exception("Invalid configuration '%s'" % a)
+            config = a
         if o in ('-l', '--load'):
             load = True
         if o in ('-b', '--bare'):
@@ -111,7 +119,7 @@ def main(argv=None):
 
     # Simulate shift register
     #
-    # (example for CRC16, 0x8005)
+    # Galois style (example for CRC16, 0x8005)
     #
     #  ,-------------------+---------------------------------+------------,
     #  |                   |                                 |            |
@@ -119,27 +127,54 @@ def main(argv=None):
     #  `->|  0 |->|  1 |->(+)->|  2 |->|  3 |->...->| 14 |->(+)->| 15 |->(+)<-DIN (MSB first) 
     #     '----'  '----'       '----'  '----'       '----'       '----'
     #
+    # Fibonacci style (example for 64b66b, 0x8000000001)
+    #
+    #  ,-----------------------------(+)<------------------------------,
+    #  |                              ^                                |
+    #  |  .----.  .----.       .----. |  .----.       .----.  .----.   | 
+    #  `->|  0 |->|  1 |->...->| 38 |-+->| 39 |->...->| 56 |->| 57 |->(+)<-DIN (MSB first) 
+    #     '----'  '----'       '----'    '----'       '----'  '----'
+    #
 
     # list index is output pin
     # list elements are [last state, input data]
     # initial state is 1:1 mapping from previous state to next state
     crc_next = collections.deque([[[x], []] for x in range(width)])
 
-    for i in range(datawidth-1, -1, -1):
-        # determine shift in value
-        # current value in last FF, XOR with input data bit (MSB first)
-        val = copy.deepcopy(crc_next[-1])
-        val[1].append(i)
+    if config == 'galois':
+        # Galois configuration
+        for i in range(datawidth-1, -1, -1):
+            # determine shift in value
+            # current value in last FF, XOR with input data bit (MSB first)
+            val = copy.deepcopy(crc_next[-1])
+            val[1].append(i)
 
-        # shift
-        crc_next.rotate(1)
-        crc_next[0] = val
+            # shift
+            crc_next.rotate(1)
+            crc_next[0] = val
 
-        # add XOR inputs at correct indicies
-        for i in range(1, width):
-            if poly & (1 << i):
-                crc_next[i][0]+=val[0]
-                crc_next[i][1]+=val[1]
+            # add XOR inputs at correct indicies
+            for i in range(1, width):
+                if poly & (1 << i):
+                    crc_next[i][0] += val[0]
+                    crc_next[i][1] += val[1]
+    elif config == 'fibonacci':
+        # Fibonacci configuration
+        for i in range(datawidth-1, -1, -1):
+            # determine shift in value
+            # current value in last FF, XOR with input data bit (MSB first)
+            val = copy.deepcopy(crc_next[-1])
+            val[1].append(i)
+
+            # add XOR inputs from correct indicies
+            for i in range(1, width):
+                if poly & (1 << i):
+                    val[0] += crc_next[i-1][0]
+                    val[1] += crc_next[i-1][1]
+
+            # shift
+            crc_next.rotate(1)
+            crc_next[0] = val
 
     # optimize
     # since X^X = 0, bin and count identical inputs
@@ -212,16 +247,17 @@ THE SOFTWARE.
  * Initial value:  {{w}}'h{{'%x' % init}}{%- if reverse %} (reversed: {{w}}'h{{'%x' % init2}}){%- endif %}
 {%- endif %}
  * CRC polynomial: {{w}}'h{{'%x' % poly}}
+ * Configuration:  {{config}}
 {%- if reverse %}
  * Bit-reverse:    input and output
 {%- endif %}
- * 
+ *
  * {{poly_str}}
  *
  * Generated by crcgen.py
  *
  * {{cmdline}}
- * 
+ *
  */
 module {{name}}
 (
@@ -287,6 +323,7 @@ endmodule
         crc_next=crc_next,
         load=load,
         bare=bare,
+        config=config,
         reverse=reverse,
         name=name,
         cmdline=cmdline
