@@ -262,7 +262,7 @@ THE SOFTWARE.
 {%- endif %}
  * Data width:     {{dw}}
 {%- if not bare %}
- * Initial value:  {{w}}'h{{'%x' % init}}{%- if reverse %} (reversed: {{w}}'h{{'%x' % init2}}){%- endif %}
+ * Initial value:  {{sw}}'h{{'%x' % init}}{%- if reverse %} (reversed: {{sw}}'h{{'%x' % init2}}){%- endif %}
 {%- endif %}
  * CRC polynomial: {{w}}'h{{'%x' % poly}}
  * Configuration:  {{config}}
