@@ -153,7 +153,7 @@ def main(argv=None):
 
     t = Template(u"""/*
 
-Copyright (c) 2014 Alex Forencich
+Copyright (c) 2014-2015 Alex Forencich
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -214,20 +214,17 @@ module {{name}}
     output wire [{{w-1}}:0] crc_next
 {%- endif %}
 );
-
-{% if not bare -%}
-reg [{{w-1}}:0] crc_state, crc_next;
+{% if not bare %}
+reg [{{w-1}}:0] crc_state;
+wire crc_next;
 
 assign crc_out = crc_next;
-
 {% endif -%}
-always @* begin
-    {%- for p in range(w) %}
-    crc_next[{{p}}] = {% if crc_next[p][0]|length == 0 and crc_next[p][1]|length == 0 -%}0{% else %}
+{%- for p in range(w) %}
+assign crc_next[{{p}}] = {% if crc_next[p][0]|length == 0 and crc_next[p][1]|length == 0 -%}0{% else %}
         {%- for i in crc_next[p][0] %}{% if not loop.first %} ^ {% endif %}crc_state[{{i}}]{% endfor %}
         {%- for i in crc_next[p][1] %}{% if crc_next[p][0]|length != 0 or not loop.first %} ^ {% endif %}data_in[{{i}}] {%- endfor %}{% endif %};
-    {%- endfor %}
-end
+{%- endfor %}
 
 {% if not bare -%}
 always @(posedge clk or posedge rst) begin
