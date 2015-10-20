@@ -1,81 +1,42 @@
 #!/usr/bin/env python
-"""UCF insert IO
-
-Inserts IO pin information into UCF files.  
-
-Usage:
-
-ucf-insert-io [opts]
-    -h, --help        help
-    -p, --pkg=PATH  Xilinx package file
-        --ioc=NUM   IO name column (needed for multi-part CSV package files)
-    -u, --ucf=PATH  Input UCF file
-    -o, --out=PATH  Output UCF file
+"""
+Inserts IO pin information into UCF files
 """
 
-import sys
-import getopt
+from __future__ import print_function
+
+import argparse
 import csv
 import re
+from jinja2 import Template
 
-class Usage(Exception):
-    def __init__(self, msg):
-        self.msg = msg
+import verilogParse
 
-def main(argv=None):
-    if argv is None:
-        argv = sys.argv
-    try:
-        try:
-            opts, args = getopt.getopt(argv[1:], "hp:u:o:", ["help", "pkg=", "ioc=", "ucf=", "out="])
-        except getopt.error as msg:
-             raise Usage(msg)
-        # more code, unchanged
-    except Usage as err:
-        print(err.msg, file=sys.stderr)
-        print("for help use --help", file=sys.stderr)
-        return 2
-    
-    pkg_name = None
-    input_name = None
-    output_name = None
-    opt_io_col = -1
-    
-    # process options
-    for o, a in opts:
-        if o in ('-h', '--help'):
-            print(__doc__)
-            sys.exit(0)
-        if o in ('-p', '--pkg'):
-            pkg_name = a
-        if o in ('--ioc'):
-            opt_io_col = int(a)-1
-        if o in ('-u', '--ucf'):
-            input_name = a
-            if output_name is None:
-                output_name = a + '.out'
-        if o in ('-o', '--out'):
-            output_name = a
-    
-    # process arguments
-    #for arg in args:
-    #    print(arg)
-    
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.strip())
+    parser.add_argument('input',          type=str, help="input UCF file")
+    parser.add_argument('-p', '--pkg',    type=str, help="Xilinx package file")
+    parser.add_argument('--ioc',          type=int, help="IO name column (for multi-part CSV)")
+    parser.add_argument('-o', '--output', type=str, help="output file name")
+
+    args = parser.parse_args()
+
+    pkg_name = args.pkg
+    input_name = args.input
+    output_name = args.output
+    opt_io_col = -1 if args.ioc is None else args.ioc-1
+
     if pkg_name is None:
-        print("Error: Package file not specified", file=sys.stderr)
-        return 1
+        raise Exception("No package file specified")
     if input_name is None:
-        print("Error: Input file not specified", file=sys.stderr)
-        return 1
+        raise Exception("No input file specified")
     if output_name is None:
-        print("Error: Output file not specified", file=sys.stderr)
-        return 1
+        output_name = input_name + '.out'
     
     print("Reading package file")
     
     try:
         pkg_file = open(pkg_name, 'r')
-        #pkg_reader = csv.reader(pkg_file, csv.excel_tab)
     except Exception as ex:
         print("Error opening \"%s\": %s" %(pkg_name, ex.strerror), file=sys.stderr)
         exit(1)
@@ -210,6 +171,5 @@ def main(argv=None):
     
 
 if __name__ == "__main__":
-    sys.exit(main())
-
+    main()
 

@@ -1,96 +1,58 @@
 #!/usr/bin/env python
-"""CRC Generator
-
+"""
 Generates combinatorial LFSR/CRC logic in Verilog.
-
-Usage: crcgen [OPTION]...
-  -?, --help        display this help and exit
-  -w, --width       specify width of CRC (default 32)
-  -d, --datawidth   specify width of input data bus (default 8)
-  -p, --poly        specify CRC polynomial (default 0x04c11db7)
-  -i, --init        specify CRC initial state (default -1)
-  -c, --config      specify LFSR configuration
-                      galois (internal xor, common for CRC, default)
-                      fibonacci (external xor, common for LFSR)
-  -l, --load        include load logic
-  -b, --bare        only generate combinatorial logic
-  -e, --extend      extend state width to data width
-  -r, --reverse     bit-reverse input and output
-  -n, --name        specify module name
-  -o, --output      specify output file name
 """
 
-import sys
-import getopt
+from __future__ import print_function
+
+import argparse
 import collections
 import copy
 from jinja2 import Template
 
-class Usage(Exception):
-    def __init__(self, msg):
-        self.msg = msg
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.strip())
+    parser.add_argument('-w', '--width',     type=int, default=32,           help="width of CRC (default 32)")
+    parser.add_argument('-d', '--datawidth', type=int, default=8,            help="width of input data bus (default 8)")
+    parser.add_argument('-p', '--poly',      type=str, default='0x04c11db7', help="CRC polynomial (default 0x04c11db7)")
+    parser.add_argument('-i', '--init',      type=int, default=-1,           help="CRC initial state (default -1)")
+    parser.add_argument('-c', '--config',    type=str, default='galois',
+                                choices=['galois', 'fibonacci'],             help="LFSR configuration (default galois)")
+    parser.add_argument('-l', '--load',      action='store_true',            help="include load logic")
+    parser.add_argument('-b', '--bare',      action='store_true',            help="only generate combinatorial logic")
+    parser.add_argument('-e', '--extend',    action='store_true',            help="extend state width to data width")
+    parser.add_argument('-r', '--reverse',   action='store_true',            help="bit-reverse input and output")
+    parser.add_argument('-n', '--name',      type=str,                       help="module name")
+    parser.add_argument('-o', '--output',    type=str,                       help="output file name")
 
-def main(argv=None):
-    if argv is None:
-        argv = sys.argv
+    args = parser.parse_args()
+
     try:
-        try:
-            opts, args = getopt.getopt(argv[1:], "?w:d:p:i:c:lbern:o:", ["help", "width=", "datawidth=", "poly=", "init=", "config=", "load", "bare", "extend", "reverse", "name=", "output="])
-        except getopt.error as msg:
-             raise Usage(msg)
-        # more code, unchanged
-    except Usage as err:
-        print(err.msg, file=sys.stderr)
-        print("for help use --help", file=sys.stderr)
-        return 2
+        generate(**args.__dict__)
+    except IOError as ex:
+        print(ex)
+        exit(1)
 
-    width = 32
-    datawidth = 8
-    poly = 0x04c11db7
-    init = -1
-    config = 'galois'
-    load = False
-    bare = False
-    extend = False
-    reverse = False
-    name = None
-    out_name = None
+def generate(width=32, datawidth=8, poly=0x04c11db7, init=-1, config='galois', load=False, bare=False, extend=False, reverse=False, name=None, output=None):
+    poly = int(poly, 0)
+    cmdline = "crcgen.py"
+    cmdline += " -w {0}".format(width)
+    cmdline += " -d {0}".format(datawidth)
+    cmdline += " -p 0x{0:x}".format(poly)
+    cmdline += " -i {0}".format(init)
+    cmdline += " -c {0}".format(config)
+    if load: cmdline += " -l"
+    if bare: cmdline += " -b"
+    if extend: cmdline += " -e"
+    if reverse: cmdline += " -r"
+    if name: cmdline += " -n {0}".format(name)
+    if output: cmdline += " -o {0}".format(output)
 
-    # process options
-    for o, a in opts:
-        if o in ('-?', '--help'):
-            print(__doc__)
-            sys.exit(0)
-        if o in ('-w', '--width'):
-            width = int(a)
-        if o in ('-d', '--datawidth'):
-            datawidth = int(a)
-        if o in ('-p', '--poly'):
-            poly = int(a, 0)
-        if o in ('-i', '--init'):
-            init = int(a, 0)
-        if o in ('-c', '--config'):
-            if a not in ('galois', 'fibonacci'):
-                raise Exception("Invalid configuration '%s'" % a)
-            config = a
-        if o in ('-l', '--load'):
-            load = True
-        if o in ('-b', '--bare'):
-            bare = True
-        if o in ('-e', '--extend'):
-            extend = True
-        if o in ('-r', '--reverse'):
-            reverse = True
-        if o in ('-n', '--name'):
-            name = a
-        if o in ('-o', '--output'):
-            out_name = a
-
-    cmdline = 'crcgen.py ' + ' '.join(argv[1:])
+    if config not in ('galois', 'fibonacci'):
+        raise Exception("Invalid configuration '%s'" % config)
 
     if poly & 1 == 0:
-        print("Error: polynomial must include zeroth order term", file=sys.stderr)
-        return 2
+        raise Exception("Polynomial must include zeroth order term")
 
     if name is None:
         name = "crc_%d_%d_0x%x" % (width, datawidth, poly)
@@ -101,16 +63,12 @@ def main(argv=None):
         if reverse:
             name += '_rev'
 
-    if out_name is None:
-        out_name = name + ".v"
+    if output is None:
+        output = name + ".v"
 
-    print("Opening file '%s'..." % out_name)
+    print("Opening file '%s'..." % output)
 
-    try:
-        out_file = open(out_name, 'w')
-    except Exception as ex:
-        print("Error opening \"%s\": %s" %(out_name, ex.strerror), file=sys.stderr)
-        exit(1)
+    output_file = open(output, 'w')
 
     print("Generating CRC module {0}...".format(name))
 
@@ -334,7 +292,7 @@ endmodule
 
 """)
     
-    out_file.write(t.render(
+    output_file.write(t.render(
         w=width,
         sw=state_width,
         dw=datawidth,
@@ -356,6 +314,5 @@ endmodule
     
 
 if __name__ == "__main__":
-    sys.exit(main())
-
+    main()
 
