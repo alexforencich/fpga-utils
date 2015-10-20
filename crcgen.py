@@ -291,12 +291,12 @@ module {{name}}
     input  wire crc_init,
 {%- if load %}
     input  wire crc_load,
-    input  wire [{{sw-1}}:0] crc_in,
+    input  wire [{{w-1}}:0] crc_in,
 {%- endif %}
     output wire [{{sw-1}}:0] crc_out
 {%- else %}
     input  wire [{{dw-1}}:0] data_in,
-    input  wire [{{sw-1}}:0] crc_state,
+    input  wire [{{w-1}}:0] crc_state,
     output wire [{{sw-1}}:0] crc_next
 {%- endif %}
 );
