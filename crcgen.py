@@ -6,7 +6,6 @@ Generates combinatorial LFSR/CRC logic in Verilog.
 from __future__ import print_function
 
 import argparse
-import collections
 import copy
 from jinja2 import Template
 
@@ -98,75 +97,59 @@ def generate(width=32, datawidth=8, poly=0x04c11db7, init=-1, config='galois', l
     #     '----'  '----'       '----'    '----'       '----'  '----'
     #
 
+    state_width = width
+
+    if extend and datawidth > width:
+        state_width = datawidth
+
     # list index is output pin
     # list elements are [last state, input data]
     # initial state is 1:1 mapping from previous state to next state
-    crc_next = collections.deque([[[x], []] for x in range(width)])
-    extend_list = []
+    crc_mask = [[[x == y for y in range(width)], [False]*datawidth] for x in range(state_width)]
 
     if config == 'galois':
         # Galois configuration
         for i in range(datawidth-1, -1, -1):
             # determine shift in value
             # current value in last FF, XOR with input data bit (MSB first)
-            val = copy.deepcopy(crc_next[-1])
-            val[1].append(i)
+            val = copy.deepcopy(crc_mask[width-1])
+            val[1][i] = not val[1][i]
 
             # shift
-            crc_next.rotate(1)
-            extend_list.insert(0, crc_next[0])
-            crc_next[0] = val
+            for i in range(state_width-1,0,-1):
+                crc_mask[i] = crc_mask[i-1]
+            crc_mask[0] = val
 
             # add XOR inputs at correct indicies
-            for i in range(1, width):
+            for i in range(1, state_width):
                 if poly & (1 << i):
-                    crc_next[i][0] += val[0]
-                    crc_next[i][1] += val[1]
+                    crc_mask[i][0] = [a^b for a, b in zip(crc_mask[i][0], val[0])]
+                    crc_mask[i][1] = [a^b for a, b in zip(crc_mask[i][1], val[1])]
+
     elif config == 'fibonacci':
         # Fibonacci configuration
         for i in range(datawidth-1, -1, -1):
             # determine shift in value
             # current value in last FF, XOR with input data bit (MSB first)
-            val = copy.deepcopy(crc_next[-1])
-            val[1].append(i)
+            val = copy.deepcopy(crc_mask[width-1])
+            val[1][i] = not val[1][i]
 
             # add XOR inputs from correct indicies
-            for i in range(1, width):
+            for i in range(1, state_width):
                 if poly & (1 << i):
-                    val[0] += crc_next[i-1][0]
-                    val[1] += crc_next[i-1][1]
+                    val[0] = [a^b for a, b in zip(crc_mask[i-1][0], val[0])]
+                    val[1] = [a^b for a, b in zip(crc_mask[i-1][1], val[1])]
 
             # shift
-            crc_next.rotate(1)
-            extend_list.insert(0, crc_next[0])
-            crc_next[0] = val
+            for i in range(state_width-1,0,-1):
+                crc_mask[i] = crc_mask[i-1]
+            crc_mask[0] = val
 
-    state_width = width
-
-    if extend and datawidth > width:
-        state_width = datawidth
-
-        # add the bits that fell off the end while shifting
-        crc_next += extend_list[:datawidth-width]
-
-    # optimize
-    # since X^X = 0, bin and count identical inputs
-    # keep one input if the total count is odd, discard the rest
-    for i in range(state_width):
-        for j in range(2):
-            cnt = collections.Counter()
-            for e in crc_next[i][j]:
-                cnt[e] += 1
-            lst = []
-            for e in cnt:
-                if cnt[e] % 2:
-                    lst.append(e)
-            lst.sort()
-            crc_next[i][j] = lst
+    crc_next = [[[i for i, b in enumerate(e) if b] for e in v] for v in crc_mask]
 
     # mask init value at the proper width
-    init = ((1 << state_width) - 1) & init;
-    init2 = init;
+    init = ((1 << state_width) - 1) & init
+    init2 = init
 
     if reverse:
         # reverse outputs
@@ -185,7 +168,7 @@ def generate(width=32, datawidth=8, poly=0x04c11db7, init=-1, config='galois', l
 
     t = Template(u"""/*
 
-Copyright (c) 2014-2015 Alex Forencich
+Copyright (c) 2014-2016 Alex Forencich
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
